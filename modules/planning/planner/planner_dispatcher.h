@@ -40,6 +40,7 @@ class PlannerDispatcher {
   virtual ~PlannerDispatcher() = default;
 
   virtual common::Status Init() {
+    //注册路径规划方法，进入RegisterPlanners查看
     RegisterPlanners();
     return common::Status::OK();
   }

@@ -39,14 +39,15 @@ using apollo::routing::RoutingResponse;
 using apollo::storytelling::Stories;
 
 bool PlanningComponent::Init() {
+  //依赖注入器，本质就是一个数据缓存中心，以便于规划任务的前后帧之间的承接，以及异常处理的回溯
   injector_ = std::make_shared<DependencyInjector>();
-
+  //apollo默认选择OnLanePlanning
   if (FLAGS_use_navigation_mode) {
     planning_base_ = std::make_unique<NaviPlanning>(injector_);
   } else {
     planning_base_ = std::make_unique<OnLanePlanning>(injector_);
   }
-
+  //加载config文件
   ACHECK(ComponentBase::GetProtoConfig(&config_))
       << "failed to load planning config file "
       << ComponentBase::ConfigFilePath();
@@ -58,9 +59,10 @@ bool PlanningComponent::Init() {
       return false;
     }
   }
-
+  //在这里执行的是OnLanePlanning::Init的初始化
   planning_base_->Init(config_);
-
+  //planning订阅话题部分-------------------------------------------
+  //订阅routing response,cyber_monitor查看，结合dreamview演示
   routing_reader_ = node_->CreateReader<RoutingResponse>(
       config_.topic_config().routing_response_topic(),
       [this](const std::shared_ptr<RoutingResponse>& routing) {
@@ -69,7 +71,7 @@ bool PlanningComponent::Init() {
         std::lock_guard<std::mutex> lock(mutex_);
         routing_.CopyFrom(*routing);
       });
-
+  //订阅交通灯信息
   traffic_light_reader_ = node_->CreateReader<TrafficLightDetection>(
       config_.topic_config().traffic_light_detection_topic(),
       [this](const std::shared_ptr<TrafficLightDetection>& traffic_light) {
@@ -77,7 +79,7 @@ bool PlanningComponent::Init() {
         std::lock_guard<std::mutex> lock(mutex_);
         traffic_light_.CopyFrom(*traffic_light);
       });
-
+  //订阅pad信息，到proto查看具体哪些信息，主要通过pad下发命令
   pad_msg_reader_ = node_->CreateReader<PadMessage>(
       config_.topic_config().planning_pad_topic(),
       [this](const std::shared_ptr<PadMessage>& pad_msg) {
@@ -85,7 +87,7 @@ bool PlanningComponent::Init() {
         std::lock_guard<std::mutex> lock(mutex_);
         pad_msg_.CopyFrom(*pad_msg);
       });
-
+  //隔离和管理复杂场景的新模块，创建可触发多个模块操作的story。所有其他模块都可以订阅此特定模块
   story_telling_reader_ = node_->CreateReader<Stories>(
       config_.topic_config().story_telling_topic(),
       [this](const std::shared_ptr<Stories>& stories) {
@@ -103,12 +105,14 @@ bool PlanningComponent::Init() {
           relative_map_.CopyFrom(*map_message);
         });
   }
+  //planning发布话题部分-----------------------------------------
+  //发布规划路径给control模块
   planning_writer_ = node_->CreateWriter<ADCTrajectory>(
       config_.topic_config().planning_trajectory_topic());
-
+  //发送路由申请给routing模块
   rerouting_writer_ = node_->CreateWriter<RoutingRequest>(
       config_.topic_config().routing_request_topic());
-
+  //基于学习方法，跳过
   planning_learning_data_writer_ = node_->CreateWriter<PlanningLearningData>(
       config_.topic_config().planning_learning_data_topic());
 

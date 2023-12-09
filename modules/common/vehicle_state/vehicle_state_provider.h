@@ -182,10 +182,12 @@ class VehicleStateProvider {
   const VehicleState& vehicle_state() const;
 
  private:
+ //获取自车线性速度
   bool ConstructExceptLinearVelocity(
       const localization::LocalizationEstimate& localization);
-
+  //车辆状态，速度，加速度，定位位置等 proto查看
   common::VehicleState vehicle_state_;
+  //定位信息
   localization::LocalizationEstimate original_localization_;
 };
 

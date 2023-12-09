@@ -104,48 +104,59 @@ OnLanePlanning::~OnLanePlanning() {
   last_routing_.Clear();
   injector_->ego_info()->Clear();
 }
-
+//返回路径规划的name
 std::string OnLanePlanning::Name() const { return "on_lane_planning"; }
 
 Status OnLanePlanning::Init(const PlanningConfig& config) {
   config_ = config;
+  //检查config文件，在这里并不完全，也可以添加其他的检查项
   if (!CheckPlanningConfig(config_)) {
     return Status(ErrorCode::PLANNING_ERROR,
                   "planning config error: " + config_.DebugString());
   }
-
+  //TaskFactory任务工厂类在Planning::Init进行初始化
+  //所有横纵向决策优化功能
   PlanningBase::Init(config_);
 
+  //planner_dispatcher_在OnLanePlanning构造函数中创建
+  //planner_factory_路径规划工厂类注册，包括rtk,public_road,lattice等
   planner_dispatcher_->Init();
 
+  //交通规则配置文件 modules/planning/conf/traffic_rule_config.pb.txt
   ACHECK(apollo::cyber::common::GetProtoFromFile(
       FLAGS_traffic_rule_config_filename, &traffic_rule_configs_))
       << "Failed to load traffic rule config file "
       << FLAGS_traffic_rule_config_filename;
 
+  //清空路径规划历史信息
   // clear planning history
   injector_->history()->Clear();
 
+  //清空路径规划上下文状态信息
   // clear planning status
   injector_->planning_context()->mutable_planning_status()->Clear();
 
+  //加载地图
   // load map
   hdmap_ = HDMapUtil::BaseMapPtr();
   ACHECK(hdmap_) << "Failed to load map";
 
   // instantiate reference line provider
+  //提取参考线以及平滑优化的主功能入口（重要）
   reference_line_provider_ = std::make_unique<ReferenceLineProvider>(
       injector_->vehicle_state(), hdmap_);
   reference_line_provider_->Start();
 
   // dispatch planner
+  //路径规划调度器
+  //创建planner object，在这里配置文件时PUBLIC_ROAD planner
   planner_ = planner_dispatcher_->DispatchPlanner(config_, injector_);
   if (!planner_) {
     return Status(
         ErrorCode::PLANNING_ERROR,
         "planning is not initialized with config : " + config_.DebugString());
   }
-
+  //学习模式
   if (config_.learning_mode() != PlanningConfig::NO_LEARNING) {
     PlanningSemanticMapConfig renderer_config;
     ACHECK(apollo::cyber::common::GetProtoFromFile(
@@ -158,6 +169,7 @@ Status OnLanePlanning::Init(const PlanningConfig& config) {
   }
 
   start_time_ = Clock::NowInSeconds();
+  //进入PUBLIC_ROAD初始化函数，主方法论，PublicRoadPlanner::Init
   return planner_->Init(config_);
 }
 
@@ -693,7 +705,7 @@ bool OnLanePlanning::CheckPlanningConfig(const PlanningConfig& config) {
   if (!config.standard_planning_config().has_planner_public_road_config()) {
     return false;
   }
-  // TODO(All): check other config params
+  // TODO(All): check other config params（将来要实现的一些功能使用TODO进行了标识）
   return true;
 }
 

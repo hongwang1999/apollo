@@ -144,6 +144,7 @@ class MapPathPoint : public common::math::Vec2d {
 
  protected:
   double heading_ = 0.0;
+  //记录LaneInfo和sl
   std::vector<LaneWaypoint> lane_waypoints_;
 };
 
@@ -348,37 +349,65 @@ class Path {
                       std::vector<PathOverlap>* const overlaps) const;
 
  protected:
+  //路径点个数
   int num_points_ = 0;
+  //线段个数，根据路径点个数计算，每两个点连接成一条线段
   int num_segments_ = 0;
+  //路径点信息
   std::vector<MapPathPoint> path_points_;
+  //LaneInfo 车道信息
   std::vector<LaneSegment> lane_segments_;
+  //车道累积长度
   std::vector<double> lane_accumulated_s_;
+  //LaneInfo 车道信息
   std::vector<LaneSegment> lane_segments_to_next_point_;
+  //单位向量
   std::vector<common::math::Vec2d> unit_directions_;
+  //路径总长度
   double length_ = 0.0;
+  //累积s
   std::vector<double> accumulated_s_;
+  //线段集
   std::vector<common::math::LineSegment2d> segments_;
   bool use_path_approximation_ = false;
+  //近似算法
   PathApproximation approximation_;
-
+  
+  //采样数据
   // Sampled every fixed length.
+  //采样点个数
   int num_sample_points_ = 0;
+  //左侧lane宽度，一般为1.7m左右
   std::vector<double> lane_left_width_;
+  //右侧lane宽度，一般为1.7m左右
   std::vector<double> lane_right_width_;
+  //左侧道路宽度
   std::vector<double> road_left_width_;
+  //右侧道路宽度
   std::vector<double> road_right_width_;
+  //上一个点的索引
   std::vector<int> last_point_index_;
-
+  //车道overlap
   std::vector<PathOverlap> lane_overlaps_;
+  //信号灯overlap
   std::vector<PathOverlap> signal_overlaps_;
+  //让行标识overlap
   std::vector<PathOverlap> yield_sign_overlaps_;
+  //停车标识overlap
   std::vector<PathOverlap> stop_sign_overlaps_;
+  //十字路口overlap
   std::vector<PathOverlap> crosswalk_overlaps_;
+  //泊车空间overlap
   std::vector<PathOverlap> parking_space_overlaps_;
+  //断头路overlap
   std::vector<PathOverlap> dead_end_overlaps_;
+  //连接处overlap
   std::vector<PathOverlap> junction_overlaps_;
+  //道路连接处overlap
   std::vector<PathOverlap> pnc_junction_overlaps_;
+  //禁止停车区域
   std::vector<PathOverlap> clear_area_overlaps_;
+  //减速带overlap
   std::vector<PathOverlap> speed_bump_overlaps_;
 };
 

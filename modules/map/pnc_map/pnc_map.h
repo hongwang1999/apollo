@@ -161,7 +161,7 @@ class PncMap {
     LaneSegment segment;
     std::array<int, 3> index;
   };
-  std::vector<RouteIndex> route_indices_;
+  std::vector<RouteIndex> route_indices_;//road_index,passage_index,lane_index路线索引
   int range_start_ = 0;
   int range_end_ = 0;
   // routing ids in range
@@ -180,8 +180,8 @@ class PncMap {
 
   // return the segment of an index
   int NextWaypointIndex(int index) const;
-
-  std::vector<WaypointIndex> routing_waypoint_index_;
+  //申请routing request的waypoint点的个数和在route_indices_中的标号索引值
+  std::vector<WaypointIndex> routing_waypoint_index_;//添加routing request waypoint索引
   /**
    * The next routing request waypoint index in routing_waypoint_index_
    */

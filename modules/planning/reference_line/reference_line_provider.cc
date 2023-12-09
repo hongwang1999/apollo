@@ -111,16 +111,17 @@ void ReferenceLineProvider::UpdateVehicleState(
   std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
   vehicle_state_ = vehicle_state;
 }
-
+//参考线生成器开始函数
 bool ReferenceLineProvider::Start() {
   if (FLAGS_use_navigation_mode) {
     return true;
   }
+  //is_initialized_在ReferenceLineProvider构造函数中设置为true，构造函数进行相关参数初始化
   if (!is_initialized_) {
     AERROR << "ReferenceLineProvider has NOT been initiated.";
     return false;
   }
-
+  //进入参考线生成线程
   if (FLAGS_enable_reference_line_provider_thread) {
     task_future_ = cyber::Async(&ReferenceLineProvider::GenerateThread, this);
   }
@@ -187,25 +188,38 @@ void ReferenceLineProvider::UpdateReferenceLine(
 }
 
 void ReferenceLineProvider::GenerateThread() {
+  //is_stop_是一个atomic参数在ReferenceLineProvider::Stop()设置为true
+  //stop函数在OnLanePlanning::~OnLanePlanning()中调用
   while (!is_stop_) {
     static constexpr int32_t kSleepTime = 50;  // milliseconds
     cyber::SleepFor(std::chrono::milliseconds(kSleepTime));
+    //计算起始时间
     const double start_time = Clock::NowInSeconds();
+    //在runOnce函数中ReferenceLineProvider::UpdateRoutingResponse将has_routing_设置为true
     if (!has_routing_) {
       AERROR << "Routing is not ready.";
       continue;
     }
+    //进入ReferenceLine和RouteSegments查看
+    //路径点信息集
     std::list<ReferenceLine> reference_lines;
+    //LaneInfo信息集
     std::list<hdmap::RouteSegments> segments;
     if (!CreateReferenceLine(&reference_lines, &segments)) {
+      //创建参考线失败 is_reference_line_updated_为atomic参数
+      //在OnLanePlanning::RunOnce中获取此值，更新失败生成刹车轨迹
       is_reference_line_updated_ = false;
       AERROR << "Fail to get reference line";
       continue;
     }
+    //更新参考线
     UpdateReferenceLine(reference_lines, segments);
+    //计算终止时间
     const double end_time = Clock::NowInSeconds();
     std::lock_guard<std::mutex> lock(reference_lines_mutex_);
+    //计算参考线生成程序耗时
     last_calculation_time_ = end_time - start_time;
+    //参考线更新成功 std::atomic<bool>
     is_reference_line_updated_ = true;
   }
 }
@@ -267,12 +281,15 @@ bool ReferenceLineProvider::GetReferenceLines(
   AWARN << "Use reference line from history!";
   return true;
 }
-
+//首先获取第一条参考线的迭代器，然后遍历所有的参考线
+//如果当前的参考线为允许变道参考线，则将第一条参考线更换为当前迭代器所指向的参考线。
+//注意：可变车道为按迭代器的顺序求取，一旦发现可变车道，即退出循环。
 void ReferenceLineProvider::PrioritzeChangeLane(
     std::list<hdmap::RouteSegments> *route_segments) {
   CHECK_NOTNULL(route_segments);
   auto iter = route_segments->begin();
-  while (iter != route_segments->end()) {
+  while (iter != route_segments->end()) {//循环参考线
+    //如果当前的参考线为允许变道参考线，则将第一条参考线更换为当前迭代器所指向的参考线
     if (!iter->IsOnSegment()) {
       route_segments->splice(route_segments->begin(), *route_segments, iter);
       break;
@@ -532,6 +549,7 @@ bool ReferenceLineProvider::GetNearestWayPointFromNavigationPath(
 bool ReferenceLineProvider::CreateRouteSegments(
     const common::VehicleState &vehicle_state,
     std::list<hdmap::RouteSegments> *segments) {
+  //获取RouteSegments
   {
     std::lock_guard<std::mutex> lock(pnc_map_mutex_);
     if (!pnc_map_->GetRouteSegments(vehicle_state, segments)) {
@@ -539,7 +557,7 @@ bool ReferenceLineProvider::CreateRouteSegments(
       return false;
     }
   }
-
+  //如果使用优先换道，进入函数查看
   if (FLAGS_prioritize_change_lane) {
     PrioritzeChangeLane(segments);
   }
@@ -551,24 +569,27 @@ bool ReferenceLineProvider::CreateReferenceLine(
     std::list<hdmap::RouteSegments> *segments) {
   CHECK_NOTNULL(reference_lines);
   CHECK_NOTNULL(segments);
-
+  //获取自车当前车辆状态，也就是定位位置
   common::VehicleState vehicle_state;
   {
     std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
     vehicle_state = vehicle_state_;
   }
-
+  //获取routing内容
   routing::RoutingResponse routing;
   {
     std::lock_guard<std::mutex> lock(routing_mutex_);
     routing = routing_;
   }
+  //判断是否是一个新的routing
   bool is_new_routing = false;
   {
     // Update routing in pnc_map
     std::lock_guard<std::mutex> lock(pnc_map_mutex_);
+    //检查routing是否与PncMap中的现有routing相同
     if (pnc_map_->IsNewRouting(routing)) {
       is_new_routing = true;
+      //如果是新的routing申请，则更新routing响应
       if (!pnc_map_->UpdateRoutingResponse(routing)) {
         AERROR << "Failed to update routing in pnc map";
         return false;
@@ -576,10 +597,12 @@ bool ReferenceLineProvider::CreateReferenceLine(
     }
   }
 
+  //创建route segments
   if (!CreateRouteSegments(vehicle_state, segments)) {
     AERROR << "Failed to create reference line from routing";
     return false;
   }
+  //如果是新的routing或者不适用参考线拼接
   if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
     for (auto iter = segments->begin(); iter != segments->end();) {
       reference_lines->emplace_back();

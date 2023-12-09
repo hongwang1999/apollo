@@ -67,7 +67,7 @@ LaneWaypoint PncMap::ToLaneWaypoint(
   ACHECK(lane) << "Invalid lane id: " << waypoint.id();
   return LaneWaypoint(lane, waypoint.s());
 }
-
+//前视距离 根据当前车速*时距(8s)>180m ? 250 : 150
 double PncMap::LookForwardDistance(double velocity) {
   auto forward_distance = velocity * FLAGS_look_forward_time_sec;
 
@@ -132,24 +132,28 @@ std::vector<routing::LaneWaypoint> PncMap::FutureRouteWaypoints() const {
 
 void PncMap::UpdateRoutingRange(int adc_index) {
   // Track routing range.
-  range_lane_ids_.clear();
+  range_lane_ids_.clear();//清空
   range_start_ = std::max(0, adc_index - 1);
   range_end_ = range_start_;
   while (range_end_ < static_cast<int>(route_indices_.size())) {
     const auto &lane_id = route_indices_[range_end_].segment.lane->id().id();
+    //如果lane_id在range_lane_ids_中，那么直接退出循环
     if (range_lane_ids_.count(lane_id) != 0) {
       break;
     }
+    //插入lane_id
     range_lane_ids_.insert(lane_id);
     ++range_end_;
   }
 }
 
 bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state) {
+  //判断routing是否有效
   if (!ValidateRouting(routing_)) {
     AERROR << "The routing is invalid when updating vehicle state.";
     return false;
   }
+  //判断前后帧之间车辆位置速度差是否超过阈值
   if (!adc_state_.has_x() ||
       (common::util::DistanceXY(adc_state_, vehicle_state) >
        FLAGS_replan_lateral_distance_threshold +
@@ -159,14 +163,16 @@ bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state) {
     adc_route_index_ = -1;
     stop_for_destination_ = false;
   }
-
+  //记录车辆状态数据
   adc_state_ = vehicle_state;
+  //根据当前车辆位置获取adc_waypoint，就是当前车辆位置在最近车道上的投影点
   if (!GetNearestPointFromRouting(vehicle_state, &adc_waypoint_)) {
     AERROR << "Failed to get waypoint from routing with point: "
            << "(" << vehicle_state.x() << ", " << vehicle_state.y() << ", "
            << vehicle_state.z() << ").";
     return false;
   }
+  //根据adc_waypoint获取在route_index的索引号，也就是route中的索引
   int route_index = GetWaypointIndex(adc_waypoint_);
   if (route_index < 0 ||
       route_index >= static_cast<int>(route_indices_.size())) {
@@ -189,7 +195,7 @@ bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state) {
   }
   return true;
 }
-
+//判断是否是一个新的routing申请
 bool PncMap::IsNewRouting(const routing::RoutingResponse &routing) const {
   return IsNewRouting(routing_, routing);
 }
@@ -204,9 +210,13 @@ bool PncMap::IsNewRouting(const routing::RoutingResponse &prev,
 }
 
 bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
-  range_lane_ids_.clear();
-  route_indices_.clear();
-  all_lane_ids_.clear();
+  //清空数据
+  range_lane_ids_.clear();//根据adc_index(车辆当前位置)更新车道id范围
+  route_indices_.clear();//road_index,passage_index,lane_index路线索引
+  all_lane_ids_.clear();//收集所有地图中routing request获得的车道id
+
+  //结合cyber_monitor和dreamview查看
+  //routing响应给了几条road，每条road有几个passage，每个passage有几个lane
   for (int road_index = 0; road_index < routing.road_size(); ++road_index) {
     const auto &road_segment = routing.road(road_index);
     for (int passage_index = 0; passage_index < road_segment.passage_size();
@@ -214,6 +224,7 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
       const auto &passage = road_segment.passage(passage_index);
       for (int lane_index = 0; lane_index < passage.segment_size();
            ++lane_index) {
+        //获取所有lane id
         all_lane_ids_.insert(passage.segment(lane_index).id());
         route_indices_.emplace_back();
         route_indices_.back().segment =
@@ -222,6 +233,8 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
           AERROR << "Failed to get lane segment from passage.";
           return false;
         }
+        //赋值road_index passage_index lane_index
+        //route_indices_很重要
         route_indices_.back().index = {road_index, passage_index, lane_index};
       }
     }
@@ -229,23 +242,31 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
 
   range_start_ = 0;
   range_end_ = 0;
+  //根据adc_route_index_来确定车辆在哪个road，哪个passage，哪个lane
   adc_route_index_ = -1;
+  //下一个routing waypoint索引，参考变量定义，route_indices_索引
   next_routing_waypoint_index_ = 0;
+  //根据adc_route_index_更新车道range_lane_ids
   UpdateRoutingRange(adc_route_index_);
 
+  //routing request waypoint在route_indices_索引
   routing_waypoint_index_.clear();
+  //获取routing request waypoints
   const auto &request_waypoints = routing.routing_request().waypoint();
+  //如果request waypoints为空
   if (request_waypoints.empty()) {
     AERROR << "Invalid routing: no request waypoints.";
     return false;
   }
+  //外层循环遍历route_indices_，内层循环遍历request_waypoints，如果request_wapoints点在route_indices_所在的lane上，
+  //添加routing_waypoint_index_信息，申请routing request的waypoint点的个数合在route_indices_中的标号索引值以及lane信息
   int i = 0;
   for (size_t j = 0; j < route_indices_.size(); ++j) {
     while (i < request_waypoints.size() &&
            RouteSegments::WithinLaneSegment(route_indices_[j].segment,
                                             request_waypoints.Get(i))) {
       routing_waypoint_index_.emplace_back(
-          LaneWaypoint(route_indices_[j].segment.lane,
+          LaneWaypoint(route_indices_[j].segment.lane,//赋值车道信息和当前request_waypoint的s值
                        request_waypoints.Get(i).s()),
           j);
       ++i;
@@ -262,16 +283,20 @@ const routing::RoutingResponse &PncMap::routing_response() const {
 }
 
 bool PncMap::ValidateRouting(const RoutingResponse &routing) {
+  //获取routing的道路数量
   const int num_road = routing.road_size();
+  //如果routing response结果的road size为0，返回错误
   if (num_road == 0) {
     AERROR << "Route is empty.";
     return false;
   }
+  //判断是否有routing_request或者申请路由的路径点数量小于2
   if (!routing.has_routing_request() ||
       routing.routing_request().waypoint_size() < 2) {
     AERROR << "Routing does not have request.";
     return false;
   }
+  //判断申请路由路径点数是否有ID或者s值
   for (const auto &waypoint : routing.routing_request().waypoint()) {
     if (!waypoint.has_id() || !waypoint.has_s()) {
       AERROR << "Routing waypoint has no lane_id or s.";
@@ -402,10 +427,13 @@ std::vector<int> PncMap::GetNeighborPassages(const routing::RoadSegment &road,
   }
   return result;
 }
+//根据当前车辆位置获取前视和后视范围内的route，也就是LaneInfo
 bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
                               std::list<RouteSegments> *const route_segments) {
+  //前视距离 根据当前车速*时距(8s)>180m ? 250 : 150
   double look_forward_distance =
       LookForwardDistance(vehicle_state.linear_velocity());
+  //后视距离 50m
   double look_backward_distance = FLAGS_look_backward_distance;
   return GetRouteSegments(vehicle_state, look_backward_distance,
                           look_forward_distance, route_segments);
@@ -415,6 +443,7 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
                               const double backward_length,
                               const double forward_length,
                               std::list<RouteSegments> *const route_segments) {
+  //更新车辆状态
   if (!UpdateVehicleState(vehicle_state)) {
     AERROR << "Failed to update vehicle state in pnc_map.";
     return false;
@@ -485,12 +514,14 @@ bool PncMap::GetRouteSegments(const VehicleState &vehicle_state,
   }
   return !route_segments->empty();
 }
-
+//根据当前车辆位置获取adc_waypoint，就是当前车辆位置在最近车道上的投影点
 bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
                                         LaneWaypoint *waypoint) const {
   waypoint->lane = nullptr;
   std::vector<LaneInfoConstPtr> lanes;
+  //转换ENU格式
   const auto point = PointFactory::ToPointENU(state);
+  //获取valid lanes
   std::vector<LaneInfoConstPtr> valid_lanes;
   for (auto lane_id : all_lane_ids_) {
     hdmap::Id id = hdmap::MakeMapId(lane_id);
@@ -501,7 +532,9 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
   }
 
   // Get nearest_waypoints for current position
+  //根据当前车辆位置获取最近的waypoint点
   std::vector<LaneWaypoint> valid_way_points;
+  //循环有效车道线
   for (const auto &lane : valid_lanes) {
     if (range_lane_ids_.count(lane->id().id()) == 0) {
       continue;
@@ -509,16 +542,18 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
     double s = 0.0;
     double l = 0.0;
     {
+      //根据当前车辆位置计算车辆在lane上的s和l值
       if (!lane->GetProjection({point.x(), point.y()}, &s, &l)) {
         continue;
       }
       // Use large epsilon to allow projection diff
+      //根据计算的s值过滤无效车道
       static constexpr double kEpsilon = 0.5;
       if (s > (lane->total_length() + kEpsilon) || (s + kEpsilon) < 0.0) {
         continue;
       }
     }
-
+    //填充有效way_point信息，可能有几条车道符合上述条件
     valid_way_points.emplace_back();
     auto &last = valid_way_points.back();
     last.lane = lane;
@@ -526,6 +561,7 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
     last.l = l;
     ADEBUG << "distance:" << std::fabs(l);
   }
+  //如果有效way_point为空，则返回错误
   if (valid_way_points.empty()) {
     AERROR << "Failed to find nearest point: " << point.ShortDebugString();
     return false;
@@ -533,6 +569,7 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
 
   // Choose the lane with the right heading if there is more than one candiate
   // lanes. If there is no lane with the right heading, choose the closest one.
+  //如果超过一个候选车道线，选择正确航向角度的车道线，如果没有正确航向角度的车道线，则选择最近车道线
   size_t closest_index = 0;
   int right_heading_index = -1;
   // The distance as the sum of the lateral and longitude distance, to estimate
@@ -541,6 +578,7 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
   double lane_heading = 0.0;
   double vehicle_heading = state.heading();
   for (size_t i = 0; i < valid_way_points.size(); i++) {
+    //获取当前车辆位置距离车道中心线
     double distance_to_lane = std::fabs(valid_way_points[i].l);
     if (valid_way_points[i].s > valid_way_points[i].lane->total_length()) {
       distance_to_lane +=

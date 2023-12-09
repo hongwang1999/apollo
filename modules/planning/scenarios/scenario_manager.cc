@@ -57,8 +57,11 @@ ScenarioManager::ScenarioManager(
 
 bool ScenarioManager::Init(const PlanningConfig& planning_config) {
   planning_config_.CopyFrom(planning_config);
+  //注册场景
   RegisterScenarios();
+  //默认场景是lane follow
   default_scenario_type_ = ScenarioType::LANE_FOLLOW;
+  //创建当前场景对象为lane follow
   current_scenario_ = CreateScenario(default_scenario_type_);
   return true;
 }
@@ -135,6 +138,7 @@ std::unique_ptr<Scenario> ScenarioManager::CreateScenario(
 
 void ScenarioManager::RegisterScenarios() {
   // lane_follow
+  //车道跟随场景
   if (planning_config_.learning_mode() == PlanningConfig::HYBRID ||
       planning_config_.learning_mode() == PlanningConfig::HYBRID_TEST) {
     // HYBRID or HYBRID_TEST
@@ -146,15 +150,18 @@ void ScenarioManager::RegisterScenarios() {
   }
 
   // bare_intersection
+  //裸露交叉路口，没有交通灯、停止牌的路口
   ACHECK(Scenario::LoadConfig(
       FLAGS_scenario_bare_intersection_unprotected_config_file,
       &config_map_[ScenarioType::BARE_INTERSECTION_UNPROTECTED]));
 
   // emergency_pull_over
+  //紧急靠边停车场景
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_emergency_pull_over_config_file,
                               &config_map_[ScenarioType::EMERGENCY_PULL_OVER]));
 
   // emergency_stop
+  //紧急停车场景
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_emergency_stop_config_file,
                               &config_map_[ScenarioType::EMERGENCY_STOP]));
 
@@ -164,19 +171,24 @@ void ScenarioManager::RegisterScenarios() {
                            &config_map_[ScenarioType::LEARNING_MODEL_SAMPLE]));
 
   // park_and_go
+  //停车即走场景
+  //这种情况主要针对路边送货或乘客接送等情况，该方案将Open Space Planner与其他传统轨迹规划器结合在一起
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_park_and_go_config_file,
                               &config_map_[ScenarioType::PARK_AND_GO]));
 
   // pull_over
+  //靠边停车场景
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_pull_over_config_file,
                               &config_map_[ScenarioType::PULL_OVER]));
 
   // stop_sign
+  //停车标志场景
   ACHECK(
       Scenario::LoadConfig(FLAGS_scenario_stop_sign_unprotected_config_file,
                            &config_map_[ScenarioType::STOP_SIGN_UNPROTECTED]));
 
   // traffic_light
+  //交通灯场景
   ACHECK(Scenario::LoadConfig(
       FLAGS_scenario_traffic_light_protected_config_file,
       &config_map_[ScenarioType::TRAFFIC_LIGHT_PROTECTED]));
@@ -188,10 +200,12 @@ void ScenarioManager::RegisterScenarios() {
       &config_map_[ScenarioType::TRAFFIC_LIGHT_UNPROTECTED_RIGHT_TURN]));
 
   // valet parking
+  //代客泊车场景
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_valet_parking_config_file,
                               &config_map_[ScenarioType::VALET_PARKING]));
 
   // yield_sign
+  //让行场景
   ACHECK(Scenario::LoadConfig(FLAGS_scenario_yield_sign_config_file,
                               &config_map_[ScenarioType::YIELD_SIGN]));
 }

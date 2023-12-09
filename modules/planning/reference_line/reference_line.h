@@ -214,19 +214,26 @@ class ReferenceLine {
 
  private:
   struct SpeedLimit {
+    //道路限速起始s
     double start_s = 0.0;
+    //道路限速终止s
     double end_s = 0.0;
+    //道路限速限制速度
     double speed_limit = 0.0;  // unit m/s
     SpeedLimit() = default;
     SpeedLimit(double _start_s, double _end_s, double _speed_limit)
         : start_s(_start_s), end_s(_end_s), speed_limit(_speed_limit) {}
   };
+  //道路限速
   /**
    * This speed limit overrides the lane speed limit
    **/
   std::vector<SpeedLimit> speed_limit_;
+  //参考线轨迹点，进入ReferencePoint查看
   std::vector<ReferencePoint> reference_points_;
+  //记录道路信息，进入hdmap::Path查看
   hdmap::Path map_path_;
+  //参考线优先级
   uint32_t priority_ = 0;
 };
 

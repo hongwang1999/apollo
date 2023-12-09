@@ -46,6 +46,7 @@ class ReferencePoint : public hdmap::MapPathPoint {
   static void RemoveDuplicates(std::vector<ReferencePoint>* points);
 
  private:
+  //道路曲率信息
   double kappa_ = 0.0;
   double dkappa_ = 0.0;
 };
