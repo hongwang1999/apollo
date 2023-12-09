@@ -580,14 +580,21 @@ bool PncMap::GetNearestPointFromRouting(const VehicleState &state,
   for (size_t i = 0; i < valid_way_points.size(); i++) {
     //获取当前车辆位置距离车道中心线
     double distance_to_lane = std::fabs(valid_way_points[i].l);
+    //如果way_point的s值大于车道线总长度
+    //-------------------------total_length  <  way_point_s
     if (valid_way_points[i].s > valid_way_points[i].lane->total_length()) {
+      //距离车道线的距离=距离车道线横向距离+(way_point_s-total_length)
       distance_to_lane +=
           (valid_way_points[i].s - valid_way_points[i].lane->total_length());
     } else if (valid_way_points[i].s < 0.0) {
+      //way_point_s  0--------------------------
+      //距离车道线的距离=距离车道线横向距离-way_point_s
       distance_to_lane -= valid_way_points[i].s;
     }
     if (distance > distance_to_lane) {
       distance = distance_to_lane;
+      //记录最近车道线的最近点索引
+      
       closest_index = i;
     }
     lane_heading = valid_way_points[i].lane->Heading(valid_way_points[i].s);
