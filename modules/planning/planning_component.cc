@@ -59,6 +59,7 @@ bool PlanningComponent::Init() {
       return false;
     }
   }
+  
   //在这里执行的是OnLanePlanning::Init的初始化
   planning_base_->Init(config_);
   //planning订阅话题部分-------------------------------------------
