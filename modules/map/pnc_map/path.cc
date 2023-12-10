@@ -315,12 +315,16 @@ Path::Path(const std::vector<MapPathPoint>& path_points,
 Path::Path(const std::vector<LaneSegment>& segments)
     : lane_segments_(segments) {
   for (const auto& segment : lane_segments_) {
+    //从车道的起始和终止s获取points，然后赋值给path_points_
     const auto points = MapPathPoint::GetPointsFromLane(
         segment.lane, segment.start_s, segment.end_s);
+    //插入点
     path_points_.insert(path_points_.end(), points.begin(), points.end());
   }
+  //剔除重复点
   MapPathPoint::RemoveDuplicates(&path_points_);
   CHECK_GE(path_points_.size(), 2U);
+  //初始化
   Init();
 }
 
@@ -349,6 +353,7 @@ Path::Path(std::vector<MapPathPoint>&& path_points,
 }
 
 void Path::Init() {
+  //初始化点集
   InitPoints();
   InitLaneSegments();
   InitPointIndex();
@@ -357,12 +362,16 @@ void Path::Init() {
 }
 
 void Path::InitPoints() {
+  //获取道路点的个数
   num_points_ = static_cast<int>(path_points_.size());
   CHECK_GE(num_points_, 2);
-
+  //清空accumulated_s_
   accumulated_s_.clear();
+  //申请存储空间
   accumulated_s_.reserve(num_points_);
+  //segments_清空（LineSegment2d类型，线段）
   segments_.clear();
+  //申请存储空间
   segments_.reserve(num_points_);
   unit_directions_.clear();
   unit_directions_.reserve(num_points_);

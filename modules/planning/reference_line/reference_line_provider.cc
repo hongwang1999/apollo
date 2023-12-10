@@ -608,14 +608,17 @@ bool ReferenceLineProvider::CreateReferenceLine(
       reference_lines->emplace_back();
       if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
         AERROR << "Failed to create reference line from route segments";
+        //如果优化失败，则剔除
         reference_lines->pop_back();
         iter = segments->erase(iter);
       } else {
+        //参考线优化成功
         common::SLPoint sl;
         if (!reference_lines->back().XYToSL(vehicle_state, &sl)) {
           AWARN << "Failed to project point: {" << vehicle_state.x() << ","
                 << vehicle_state.y() << "} to stitched reference line";
         }
+        //收缩参考线和segment
         Shrink(sl, &reference_lines->back(), &(*iter));
         ++iter;
       }
@@ -893,7 +896,9 @@ void ReferenceLineProvider::GetAnchorPoints(
 
 bool ReferenceLineProvider::SmoothRouteSegment(const RouteSegments &segments,
                                                ReferenceLine *reference_line) {
+  //查看Path构造函数
   hdmap::Path path(segments);
+  //进入ReferenceLine构造函数查看ReferenceLine构造
   return SmoothReferenceLine(ReferenceLine(path), reference_line);
 }
 
