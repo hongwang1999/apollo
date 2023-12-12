@@ -800,18 +800,23 @@ bool ReferenceLineProvider::IsReferenceLineSmoothValid(
 AnchorPoint ReferenceLineProvider::GetAnchorPoint(
     const ReferenceLine &reference_line, double s) const {
   AnchorPoint anchor;
-  anchor.longitudinal_bound = smoother_config_.longitudinal_boundary_bound();
-  auto ref_point = reference_line.GetReferencePoint(s);
+  //获取纵向边界
+  anchor.longitudinal_bound = smoother_config_.longitudinal_boundary_bound();//2.0
+  auto ref_point = reference_line.GetReferencePoint(s);//根据s值获取参考线上的ref_point
+  //如果lane_waypoints为空
   if (ref_point.lane_waypoints().empty()) {
     anchor.path_point = ref_point.ToPathPoint(s);
+    //根据配置文件获取横向边界
     anchor.lateral_bound = smoother_config_.max_lateral_boundary_bound();
     return anchor;
   }
-
+  //根据配置文件获取车辆宽度
   const double adc_width =
       VehicleConfigHelper::GetConfig().vehicle_param().width();
+  //创建单位向量，垂直点航向角度
   const Vec2d left_vec =
       Vec2d::CreateUnitVec2d(ref_point.heading() + M_PI / 2.0);
+  //根据waypoint获取车道左侧和右侧边界宽度
   auto waypoint = ref_point.lane_waypoints().front();
   double left_width = 0.0;
   double right_width = 0.0;
@@ -820,20 +825,24 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
   double effective_width = 0.0;
 
   // shrink width by vehicle width, curb
+  //根据车辆宽度收缩边界宽度
   double safe_lane_width = left_width + right_width;
+  //减去车辆宽度
   safe_lane_width -= adc_width;
-  bool is_lane_width_safe = true;
-
+  bool is_lane_width_safe = true;//车道宽度是否安全
+  //如果安全车道宽度小于0
   if (safe_lane_width < kEpislon) {
     ADEBUG << "lane width [" << left_width + right_width << "] "
            << "is smaller than adc width [" << adc_width << "]";
     effective_width = kEpislon;
     is_lane_width_safe = false;
   }
-
+  //中心偏移
   double center_shift = 0.0;
+  //如果是右侧边界马路牙子
   if (hdmap::RightBoundaryType(waypoint) == hdmap::LaneBoundaryType::CURB) {
-    safe_lane_width -= smoother_config_.curb_shift();
+    //如果有马路牙子，则减去相应阈值
+    safe_lane_width -= smoother_config_.curb_shift();//0.2
     if (safe_lane_width < kEpislon) {
       ADEBUG << "lane width smaller than adc width and right curb shift";
       effective_width = kEpislon;
@@ -842,33 +851,38 @@ AnchorPoint ReferenceLineProvider::GetAnchorPoint(
       center_shift += 0.5 * smoother_config_.curb_shift();
     }
   }
+  //如果是左侧马路牙子
   if (hdmap::LeftBoundaryType(waypoint) == hdmap::LaneBoundaryType::CURB) {
+    //如果有马路牙子，则减去相应阈值
     safe_lane_width -= smoother_config_.curb_shift();
     if (safe_lane_width < kEpislon) {
       ADEBUG << "lane width smaller than adc width and left curb shift";
       effective_width = kEpislon;
       is_lane_width_safe = false;
     } else {
+      //中心偏移0.1
       center_shift -= 0.5 * smoother_config_.curb_shift();
     }
   }
 
   //  apply buffer if possible
+  //安全余量
   const double buffered_width =
-      safe_lane_width - 2.0 * smoother_config_.lateral_buffer();
+      safe_lane_width - 2.0 * smoother_config_.lateral_buffer();//0.2
   safe_lane_width =
-      buffered_width < kEpislon ? safe_lane_width : buffered_width;
+      buffered_width < kEpislon ? safe_lane_width : buffered_width;//安全车道宽度选择
 
   // shift center depending on the road width
+  //根据道路宽度做中心偏移
   if (is_lane_width_safe) {
-    effective_width = 0.5 * safe_lane_width;
+    effective_width = 0.5 * safe_lane_width;//添加到横向边界
   }
-
+  //将参考点做中心偏移
   ref_point += left_vec * center_shift;
-  anchor.path_point = ref_point.ToPathPoint(s);
+  anchor.path_point = ref_point.ToPathPoint(s);//将ref_point转换为path_point
   anchor.lateral_bound = common::math::Clamp(
-      effective_width, smoother_config_.min_lateral_boundary_bound(),
-      smoother_config_.max_lateral_boundary_bound());
+      effective_width, smoother_config_.min_lateral_boundary_bound(),//0.1
+      smoother_config_.max_lateral_boundary_bound());//0.5
   return anchor;
 }
 
@@ -877,15 +891,21 @@ void ReferenceLineProvider::GetAnchorPoints(
     std::vector<AnchorPoint> *anchor_points) const {
   CHECK_NOTNULL(anchor_points);
   const double interval = smoother_config_.max_constraint_interval();
+  //根据参考线的长度及采样间隔获取锚点个数
   int num_of_anchors =
       std::max(2, static_cast<int>(reference_line.Length() / interval + 0.5));
   std::vector<double> anchor_s;
+  //将参考线length按照anchors点数等距离分割，添加anchor_s
   common::util::uniform_slice(0.0, reference_line.Length(), num_of_anchors - 1,
                               &anchor_s);
+  //循环遍历anchor_s
   for (const double s : anchor_s) {
+    //根据anchor_s获取锚点，添加横纵向边界
     AnchorPoint anchor = GetAnchorPoint(reference_line, s);
+    //添加锚点
     anchor_points->emplace_back(anchor);
   }
+  //起始和终止锚点横向和纵向边界，强制约束
   anchor_points->front().longitudinal_bound = 1e-6;
   anchor_points->front().lateral_bound = 1e-6;
   anchor_points->front().enforced = true;
@@ -946,18 +966,24 @@ bool ReferenceLineProvider::SmoothPrefixedReferenceLine(
 
 bool ReferenceLineProvider::SmoothReferenceLine(
     const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
+  //如果不使用优化，则直接将参考线进行赋值
   if (!FLAGS_enable_smooth_reference_line) {
     *reference_line = raw_reference_line;
     return true;
   }
   // generate anchor points:
+  //生成锚点
   std::vector<AnchorPoint> anchor_points;
+  //获取锚点
   GetAnchorPoints(raw_reference_line, &anchor_points);
+  //给smoother_添加锚点信息，这里smoother_为DiscretePointReferenceLineSmoother
   smoother_->SetAnchorPoints(anchor_points);
+  //参考线优化
   if (!smoother_->Smooth(raw_reference_line, reference_line)) {
     AERROR << "Failed to smooth reference line with anchor points";
     return false;
   }
+  //优化参考线是否有效，就是利用优化参考线上的点与原始参考线计算l值，如果偏离了5m则认为无效
   if (!IsReferenceLineSmoothValid(raw_reference_line, *reference_line)) {
     AERROR << "The smoothed reference line error is too large";
     return false;

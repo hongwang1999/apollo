@@ -32,13 +32,14 @@ namespace planning {
 DiscretePointsReferenceLineSmoother::DiscretePointsReferenceLineSmoother(
     const ReferenceLineSmootherConfig& config)
     : ReferenceLineSmoother(config) {}
-
+//离散点参考线平滑
 bool DiscretePointsReferenceLineSmoother::Smooth(
     const ReferenceLine& raw_reference_line,
     ReferenceLine* const smoothed_reference_line) {
   std::vector<std::pair<double, double>> raw_point2d;
   std::vector<double> anchorpoints_lateralbound;
 
+  //循环遍历锚点，添加到raw_point2d，添加锚点横向边界
   for (const auto& anchor_point : anchor_points_) {
     raw_point2d.emplace_back(anchor_point.path_point.x(),
                              anchor_point.path_point.y());
@@ -47,13 +48,14 @@ bool DiscretePointsReferenceLineSmoother::Smooth(
 
   // fix front and back points to avoid end states deviate from the center of
   // road
+  //将起始点和终点横向边界固定为0，避免终点状态偏离中心道路
   anchorpoints_lateralbound.front() = 0.0;
   anchorpoints_lateralbound.back() = 0.0;
-
+  //正则化points 减去起始点
   NormalizePoints(&raw_point2d);
 
   bool status = false;
-
+  //配置文件选择FEM_POS_DEVIATION_SMOOTHING优化方法
   const auto& smoothing_method = config_.discrete_points().smoothing_method();
   std::vector<std::pair<double, double>> smoothed_point2d;
   switch (smoothing_method) {
@@ -74,19 +76,20 @@ bool DiscretePointsReferenceLineSmoother::Smooth(
     AERROR << "discrete_points reference line smoother fails";
     return false;
   }
-
+  //还原优化的点，之前是与起始点做了差值
   DeNormalizePoints(&smoothed_point2d);
 
   std::vector<ReferencePoint> ref_points;
+  //生成参考点，原始参考线  优化的点-->参考点
   GenerateRefPointProfile(raw_reference_line, smoothed_point2d, &ref_points);
-
+  //移除重复点
   ReferencePoint::RemoveDuplicates(&ref_points);
 
   if (ref_points.size() < 2) {
     AERROR << "Fail to generate smoothed reference line.";
     return false;
   }
-
+  //生成reference_line
   *smoothed_reference_line = ReferenceLine(ref_points);
   return true;
 }
@@ -132,6 +135,10 @@ bool DiscretePointsReferenceLineSmoother::CosThetaSmooth(
   return true;
 }
 
+//热启动一般是采用“相关或简化问题的最优解”来作为原问题的初始值（初始猜测）。
+//热启动提供的初始解通常非常解决原问题的最优解或者至少也是一个可行解，因此可以更快收敛。
+//此外，在非线性优化问题中可能存在很多局部最小值，良好的初值猜测可以有效的避免陷入局部最小
+//因此热启动为优化问题提供了非常好的开端
 bool DiscretePointsReferenceLineSmoother::FemPosSmooth(
     const std::vector<std::pair<double, double>>& raw_point2d,
     const std::vector<double>& bounds,
@@ -142,8 +149,8 @@ bool DiscretePointsReferenceLineSmoother::FemPosSmooth(
   FemPosDeviationSmoother smoother(fem_pos_config);
 
   // box contraints on pos are used in fem pos smoother, thus shrink the
-  // bounds by 1.0 / sqrt(2.0)
-  std::vector<double> box_bounds = bounds;
+  // bounds by 1.0 / sqrt(2.0)  缩减边界
+  std::vector<double> box_bounds = bounds;//查看WorkBook
   const double box_ratio = 1.0 / std::sqrt(2.0);
   for (auto& bound : box_bounds) {
     bound *= box_ratio;
@@ -210,34 +217,43 @@ bool DiscretePointsReferenceLineSmoother::GenerateRefPointProfile(
     const std::vector<std::pair<double, double>>& xy_points,
     std::vector<ReferencePoint>* reference_points) {
   // Compute path profile
+  //计算路径配置文件
   std::vector<double> headings;
   std::vector<double> kappas;
   std::vector<double> dkappas;
   std::vector<double> accumulated_s;
+  //计算累积s，曲率和曲率导数
   if (!DiscretePointsMath::ComputePathProfile(
           xy_points, &headings, &accumulated_s, &kappas, &dkappas)) {
     return false;
   }
 
   // Load into ReferencePoints
+  //xy_points转换到ReferencePoints
   size_t points_size = xy_points.size();
+  //循环遍历点
   for (size_t i = 0; i < points_size; ++i) {
     common::SLPoint ref_sl_point;
+    //将point转换为sl point
     if (!raw_reference_line.XYToSL({xy_points[i].first, xy_points[i].second},
                                    &ref_sl_point)) {
       return false;
     }
+    //超出边界，跳过
     const double kEpsilon = 1e-6;
     if (ref_sl_point.s() < -kEpsilon ||
         ref_sl_point.s() > raw_reference_line.Length()) {
       continue;
     }
+    //设置s
     ref_sl_point.set_s(std::max(ref_sl_point.s(), 0.0));
+    //获取参考点
     ReferencePoint rlp = raw_reference_line.GetReferencePoint(ref_sl_point.s());
     auto new_lane_waypoints = rlp.lane_waypoints();
     for (auto& lane_waypoint : new_lane_waypoints) {
       lane_waypoint.l = ref_sl_point.l();
     }
+    //最终生成reference_points
     reference_points->emplace_back(ReferencePoint(
         hdmap::MapPathPoint(
             common::math::Vec2d(xy_points[i].first, xy_points[i].second),

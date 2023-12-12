@@ -49,8 +49,10 @@ const double kSampleDistance = 0.25;
 
 bool FindLaneSegment(const MapPathPoint& p1, const MapPathPoint& p2,
                      LaneSegment* const lane_segment) {
+  //循环遍历lane waypoint
   for (const auto& wp1 : p1.lane_waypoints()) {
     for (const auto& wp2 : p2.lane_waypoints()) {
+      //如果车道id相同且wp1.s<wp2.s
       if (wp1.lane->id().id() == wp2.lane->id().id() && wp1.s < wp2.s) {
         *lane_segment = LaneSegment(wp1.lane, wp1.s, wp2.s);
         return true;
@@ -355,9 +357,13 @@ Path::Path(std::vector<MapPathPoint>&& path_points,
 void Path::Init() {
   //初始化点集
   InitPoints();
+  //初始化车道信息
   InitLaneSegments();
+  //初始化采样点索引
   InitPointIndex();
+  //初始化车道宽度
   InitWidth();
+  //初始化overlap
   InitOverlaps();
 }
 
@@ -373,27 +379,38 @@ void Path::InitPoints() {
   segments_.clear();
   //申请存储空间
   segments_.reserve(num_points_);
+  //unit_directions_单位向量清空
   unit_directions_.clear();
+  //申请存储空间
   unit_directions_.reserve(num_points_);
+
+  //循环遍历点集
   double s = 0.0;
   for (int i = 0; i < num_points_; ++i) {
+    //添加累积s值
     accumulated_s_.push_back(s);
     Vec2d heading;
     if (i + 1 >= num_points_) {
+      //计算最后两点之间的向量
       heading = path_points_[i] - path_points_[i - 1];
     } else {
+      //添加两点之间的线段
       segments_.emplace_back(path_points_[i], path_points_[i + 1]);
+      //计算两点之间的向量
       heading = path_points_[i + 1] - path_points_[i];
       // TODO(All): use heading.length when all adjacent lanes are guarantee to
       // be connected.
+      //累积s计算
       s += heading.Length();
     }
+    //计算单位向量
     heading.Normalize();
     unit_directions_.push_back(heading);
   }
+  //此路径的总长度
   length_ = s;
-  num_sample_points_ = static_cast<int>(length_ / kSampleDistance) + 1;
-  num_segments_ = num_points_ - 1;
+  num_sample_points_ = static_cast<int>(length_ / kSampleDistance) + 1;//0.25
+  num_segments_ = num_points_ - 1;//例如三个点构成两条线段
 
   CHECK_EQ(accumulated_s_.size(), static_cast<size_t>(num_points_));
   CHECK_EQ(unit_directions_.size(), static_cast<size_t>(num_points_));
@@ -401,31 +418,41 @@ void Path::InitPoints() {
 }
 
 void Path::InitLaneSegments() {
+  //如果lane_segments_为空，获取lane_segments_
   if (lane_segments_.empty()) {
     for (int i = 0; i + 1 < num_points_; ++i) {
       LaneSegment lane_segment;
+      //获取lane_segment
       if (FindLaneSegment(path_points_[i], path_points_[i + 1],
                           &lane_segment)) {
         lane_segments_.push_back(lane_segment);
       }
     }
   }
+  //如果lane_segments_相邻车道有相同的车道id则合并
   LaneSegment::Join(&lane_segments_);
+  //如果lane_segments_为空，则返回
   if (lane_segments_.empty()) {
     return;
   }
+  //改变lane_accumulated_s_大小
   lane_accumulated_s_.resize(lane_segments_.size());
   lane_accumulated_s_[0] = lane_segments_[0].Length();
+  //计算车道累积s，意思是每条车道的累积s
   for (std::size_t i = 1; i < lane_segments_.size(); ++i) {
     lane_accumulated_s_[i] =
         lane_accumulated_s_[i - 1] + lane_segments_[i].Length();
   }
-
+  //清空
   lane_segments_to_next_point_.clear();
+  //申请存储空间
   lane_segments_to_next_point_.reserve(num_points_);
+  //循环遍历点集
   for (int i = 0; i + 1 < num_points_; ++i) {
     LaneSegment lane_segment;
+    //根据点获取LaneSegment
     if (FindLaneSegment(path_points_[i], path_points_[i + 1], &lane_segment)) {
+      //添加lane_segment
       lane_segments_to_next_point_.push_back(lane_segment);
     } else {
       lane_segments_to_next_point_.push_back(LaneSegment());
@@ -436,19 +463,27 @@ void Path::InitLaneSegments() {
 }
 
 void Path::InitWidth() {
+  //左侧车道宽度清空
   lane_left_width_.clear();
+  //利用采样点个数申请左侧车道宽度空间
   lane_left_width_.reserve(num_sample_points_);
+  //右侧车道宽度清空
   lane_right_width_.clear();
+  //利用采样点个数申请右侧车道宽度空间
   lane_right_width_.reserve(num_sample_points_);
 
+  //左右侧道路宽度清空及申请空间
   road_left_width_.clear();
   road_left_width_.reserve(num_sample_points_);
   road_right_width_.clear();
   road_right_width_.reserve(num_sample_points_);
 
   double s = 0;
+  //循环遍历采样点
   for (int i = 0; i < num_sample_points_; ++i) {
+    //根据采样点s获取point点
     const MapPathPoint point = GetSmoothPoint(s);
+    //如果point点lane_waypoints为空，则添加默认车道宽度和道路宽度
     if (point.lane_waypoints().empty()) {
       lane_left_width_.push_back(FLAGS_default_lane_width / 2.0);
       lane_right_width_.push_back(FLAGS_default_lane_width / 2.0);
@@ -457,23 +492,26 @@ void Path::InitWidth() {
       road_right_width_.push_back(FLAGS_default_lane_width / 2.0);
       AWARN << "path point:" << point.DebugString() << " has invalid width.";
     } else {
+      //提取第一个lane_waypoint
       const LaneWaypoint waypoint = point.lane_waypoints()[0];
       CHECK_NOTNULL(waypoint.lane);
 
       double lane_left_width = 0.0;
       double lane_right_width = 0.0;
+      //根据waypoint的s提取车道宽度
       waypoint.lane->GetWidth(waypoint.s, &lane_left_width, &lane_right_width);
       lane_left_width_.push_back(lane_left_width - waypoint.l);
       lane_right_width_.push_back(lane_right_width + waypoint.l);
 
       double road_left_width = 0.0;
       double road_right_width = 0.0;
+      //根据waypoint的s提取道路宽度
       waypoint.lane->GetRoadWidth(waypoint.s, &road_left_width,
                                   &road_right_width);
       road_left_width_.push_back(road_left_width - waypoint.l);
       road_right_width_.push_back(road_right_width + waypoint.l);
     }
-    s += kSampleDistance;
+    s += kSampleDistance;//0.25
   }
 
   auto num_sample_points = static_cast<size_t>(num_sample_points_);
@@ -485,11 +523,15 @@ void Path::InitWidth() {
 }
 
 void Path::InitPointIndex() {
+  //清空数据
   last_point_index_.clear();
+  //根据采样点个数申请空间
   last_point_index_.reserve(num_sample_points_);
   double s = 0.0;
   int last_index = 0;
+  //外层循环遍历采样点个数
   for (int i = 0; i < num_sample_points_; ++i) {
+    //内层循环路径点个数，主要是按照采样点的距离s值来计算每个采样点在num_points_中的索引
     while (last_index + 1 < num_points_ &&
            accumulated_s_[last_index + 1] <= s) {
       ++last_index;
@@ -502,6 +544,7 @@ void Path::InitPointIndex() {
 
 void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
                           std::vector<PathOverlap>* const overlaps) const {
+  //如果overlaps为空指针，则直接返回
   if (overlaps == nullptr) {
     return;
   }
@@ -509,21 +552,29 @@ void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
   std::unordered_map<std::string, std::vector<std::pair<double, double>>>
       overlaps_by_id;
   double s = 0.0;
+  //循环遍历lane_segments_
   for (const auto& lane_segment : lane_segments_) {
+    //如果lane_segment的lane为空指针，则跳过
     if (lane_segment.lane == nullptr) {
       continue;
     }
+    //根据车道获取overlaps，循环遍历overlap
     for (const auto& overlap : GetOverlaps_from_lane(*(lane_segment.lane))) {
+      //获取overlap_info
       const auto& overlap_info =
           overlap->GetObjectOverlapInfo(lane_segment.lane->id());
+      //如果为空指针，则跳过
       if (overlap_info == nullptr) {
         continue;
       }
 
       const auto& lane_overlap_info = overlap_info->lane_overlap_info();
+      //如果overlap_info在车道起始和终点s范围内
       if (lane_overlap_info.start_s() <= lane_segment.end_s &&
           lane_overlap_info.end_s() >= lane_segment.start_s) {
         const double ref_s = s - lane_segment.start_s;
+        //这里adjusted_start_s和adjusted_end_s相对于第一个LaneSegment的start_s来计算的
+        //计算overlap调整的起点s和终点s，为整个lane_segments_累积的起点s和终点s
         const double adjusted_start_s =
             std::max(lane_overlap_info.start_s(), lane_segment.start_s) + ref_s;
         const double adjusted_end_s =
@@ -539,12 +590,13 @@ void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
     s += lane_segment.end_s - lane_segment.start_s;
   }
   for (auto& overlaps_one_object : overlaps_by_id) {
-    const std::string& object_id = overlaps_one_object.first;
-    auto& segments = overlaps_one_object.second;
-    std::sort(segments.begin(), segments.end());
+    const std::string& object_id = overlaps_one_object.first;//获取id
+    auto& segments = overlaps_one_object.second;//获取起始s和终点s
+    std::sort(segments.begin(), segments.end());//进行排序
 
     const double kMinOverlapDistanceGap = 1.5;  // in meters.
     for (const auto& segment : segments) {
+      //根据kMinOverlapDistanceGap来覆盖合并
       if (!overlaps->empty() && overlaps->back().object_id == object_id &&
           segment.first - overlaps->back().end_s <= kMinOverlapDistanceGap) {
         overlaps->back().end_s =
@@ -554,6 +606,7 @@ void Path::GetAllOverlaps(GetOverlapFromLaneFunc GetOverlaps_from_lane,
       }
     }
   }
+  //根据start_s排序
   std::sort(overlaps->begin(), overlaps->end(),
             [](const PathOverlap& overlap1, const PathOverlap& overlap2) {
               return overlap1.start_s < overlap2.start_s;
@@ -572,16 +625,26 @@ const PathOverlap* Path::NextLaneOverlap(double s) const {
 }
 
 void Path::InitOverlaps() {
+  //车道交叉覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::cross_lanes, _1), &lane_overlaps_);
+  //信号灯覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::signals, _1), &signal_overlaps_);
+  //让行信号覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::yield_signs, _1), &yield_sign_overlaps_);
+  //停止标识覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::stop_signs, _1), &stop_sign_overlaps_);
+  //人行横道覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::crosswalks, _1), &crosswalk_overlaps_);
+  //路口覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::junctions, _1), &junction_overlaps_);
+  //道路连接处overlap
   GetAllOverlaps(std::bind(&LaneInfo::pnc_junctions, _1),
                  &pnc_junction_overlaps_);
+  //禁停区域覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::clear_areas, _1), &clear_area_overlaps_);
+  //减速带覆盖区域
   GetAllOverlaps(std::bind(&LaneInfo::speed_bumps, _1), &speed_bump_overlaps_);
+  //停车
   GetAllOverlaps(std::bind(&LaneInfo::parking_spaces, _1),
                  &parking_space_overlaps_);
 }
