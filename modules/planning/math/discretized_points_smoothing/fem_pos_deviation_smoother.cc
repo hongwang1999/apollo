@@ -38,13 +38,16 @@ bool FemPosDeviationSmoother::Solve(
     const std::vector<std::pair<double, double>>& raw_point2d,
     const std::vector<double>& bounds, std::vector<double>* opt_x,
     std::vector<double>* opt_y) {
+  //考虑曲率约束
   if (config_.apply_curvature_constraint()) {
     if (config_.use_sqp()) {
+      //线性求解
       return SqpWithOsqp(raw_point2d, bounds, opt_x, opt_y);
     } else {
+      //非线性求解
       return NlpWithIpopt(raw_point2d, bounds, opt_x, opt_y);
     }
-  } else {
+  } else {//不考虑曲率约束，线性求解（apollo默认选择）
     return QpWithOsqp(raw_point2d, bounds, opt_x, opt_y);
   }
   return true;
@@ -60,24 +63,26 @@ bool FemPosDeviationSmoother::QpWithOsqp(
   }
 
   FemPosDeviationOsqpInterface solver;
+  //位置偏差权重
+  solver.set_weight_fem_pos_deviation(config_.weight_fem_pos_deviation());//1e10
+  //长度代价
+  solver.set_weight_path_length(config_.weight_path_length());//1.0
+  //相对原始点偏离代价
+  solver.set_weight_ref_deviation(config_.weight_ref_deviation());//1.0
 
-  solver.set_weight_fem_pos_deviation(config_.weight_fem_pos_deviation());
-  solver.set_weight_path_length(config_.weight_path_length());
-  solver.set_weight_ref_deviation(config_.weight_ref_deviation());
+  solver.set_max_iter(config_.max_iter());//500
+  solver.set_time_limit(config_.time_limit());//0.0
+  solver.set_verbose(config_.verbose());//false
+  solver.set_scaled_termination(config_.scaled_termination());//true
+  solver.set_warm_start(config_.warm_start());//true
 
-  solver.set_max_iter(config_.max_iter());
-  solver.set_time_limit(config_.time_limit());
-  solver.set_verbose(config_.verbose());
-  solver.set_scaled_termination(config_.scaled_termination());
-  solver.set_warm_start(config_.warm_start());
-
-  solver.set_ref_points(raw_point2d);
-  solver.set_bounds_around_refs(bounds);
-
+  solver.set_ref_points(raw_point2d);//添加优化点
+  solver.set_bounds_around_refs(bounds);//添加边界
+  //优化求解
   if (!solver.Solve()) {
     return false;
   }
-
+  //优化结果
   *opt_x = solver.opt_x();
   *opt_y = solver.opt_y();
   return true;

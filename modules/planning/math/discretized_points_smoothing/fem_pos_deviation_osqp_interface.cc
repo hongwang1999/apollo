@@ -28,7 +28,7 @@ namespace apollo {
 namespace planning {
 
 bool FemPosDeviationOsqpInterface::Solve() {
-  // Sanity Check
+  // Sanity Check 合理性检查
   if (ref_points_.empty()) {
     AERROR << "reference points empty, solver early terminates";
     return false;
@@ -50,17 +50,20 @@ bool FemPosDeviationOsqpInterface::Solve() {
   }
 
   // Calculate optimization states definitions
+  //例如：这里是15个点，其中每个点有x,y方向，所以有30个变量，30个约束
   num_of_points_ = static_cast<int>(ref_points_.size());
   num_of_variables_ = num_of_points_ * 2;
   num_of_constraints_ = num_of_variables_;
 
   // Calculate kernel
+  //计算二次规划P矩阵，二次项系数
   std::vector<c_float> P_data;
   std::vector<c_int> P_indices;
   std::vector<c_int> P_indptr;
   CalculateKernel(&P_data, &P_indices, &P_indptr);
 
   // Calculate affine constraints
+  //计算二次规划A矩阵，约束矩阵
   std::vector<c_float> A_data;
   std::vector<c_int> A_indices;
   std::vector<c_int> A_indptr;
@@ -130,13 +133,20 @@ void FemPosDeviationOsqpInterface::CalculateKernel(
     std::vector<c_float>* P_data, std::vector<c_int>* P_indices,
     std::vector<c_int>* P_indptr) {
   CHECK_GT(num_of_variables_, 4);
-
+  //P矩阵，奇数列和偶数列为点X和Y
   // Three quadratic penalties are involved:
   // 1. Penalty x on distance between middle point and point by finite element
   // estimate;
   // 2. Penalty y on path length;
   // 3. Penalty z on difference between points and reference points
 
+  //在这里生成P矩阵 I代表了identity矩阵 2*2
+  //I [1 0]  0 [0 0]
+  //  [0 1]    [0 0]
+  //以展开cost_smooth为例子
+  /* 
+      （(Xk+X())）
+   */
   // General formulation of P matrix is as below(with 6 points as an example):
   // I is a two by two identity matrix, X, Y, Z represents x * I, y * I, z * I
   // 0 is a two by two zero matrix

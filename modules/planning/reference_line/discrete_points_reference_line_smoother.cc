@@ -155,7 +155,7 @@ bool DiscretePointsReferenceLineSmoother::FemPosSmooth(
   for (auto& bound : box_bounds) {
     bound *= box_ratio;
   }
-
+  //进入优化求解
   std::vector<double> opt_x;
   std::vector<double> opt_y;
   bool status = smoother.Solve(raw_point2d, box_bounds, &opt_x, &opt_y);
@@ -171,7 +171,7 @@ bool DiscretePointsReferenceLineSmoother::FemPosSmooth(
   }
 
   CHECK_EQ(opt_x.size(), opt_y.size()) << "x and y result size not equal";
-
+  //将优化结果添加到ptr_smoothed_point2d
   size_t point_size = opt_x.size();
   for (size_t i = 0; i < point_size; ++i) {
     ptr_smoothed_point2d->emplace_back(opt_x[i], opt_y[i]);
